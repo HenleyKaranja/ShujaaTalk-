@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Secure Terminal Messenger</title>
+  <style>
+    body {
+      background-color: #0f0f0f;
+      color: #00ff00;
+      font-family: "Courier New", Courier, monospace;
+      margin: 0;
+      padding: 0;
+    }
+
+    .screen {
+      padding: 20px;
+      max-width: 800px;
+      margin: 40px auto;
+      border: 2px solid #00ff00;
+      border-radius: 10px;
+      background-color: #111;
+      box-shadow: 0 0 15px #00ff00;
+    }
+
+    h1, h2 {
+      text-align: center;
+      color: #00ffcc;
+    }
+
+    label, input, textarea {
+      display: block;
+      width: 100%;
+      margin-bottom: 10px;
+      background: #000;
+      color: #0f0;
+      border: 1px solid #0f0;
+      padding: 10px;
+      border-radius: 5px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: #00ff00;
+      color: #000;
+      border: none;
+      cursor: pointer;
+      font-weight: bold;
+      margin: 5px;
+      border-radius: 5px;
+    }
+
+    .output {
+      margin-top: 20px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .error {
+      color: red;
+    }
+
+    .hidden {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+<div class="screen" id="authScreen">
+  <h1>Terminal Messenger - Auth</h1>
+  <label>Username:</label>
+  <input id="username" type="text" />
+  <label>Password:</label>
+  <input id="password" type="password" />
+  <button onclick="signUp()">Sign Up</button>
+  <button onclick="signIn()">Sign In</button>
+  <div id="authError" class="output error"></div>
+</div>
+
+<div class="screen hidden" id="homeScreen">
+  <h2>Welcome, <span id="currentUser"></span></h2>
+  <button onclick="selectMode('send')">Send Message</button>
+  <button onclick="selectMode('receive')">Receive Message</button>
+</div>
+
+<div class="screen hidden" id="sendScreen">
+  <h2>Send Message</h2>
+  <label>Message (max 150 chars):</label>
+  <textarea id="sendMessage" maxlength="150"></textarea>
+  <label>Encryption Key:</label>
+  <input id="sendKey" type="text" />
+  <button onclick="sendMessage()">Encrypt & Send</button>
+  <button onclick="goHome()">Back</button>
+  <div id="sendOutput" class="output"></div>
+</div>
+
+<div class="screen hidden" id="receiveScreen">
+  <h2>Receive Message</h2>
+  <label>Decryption Key:</label>
+  <input id="receiveKey" type="text" />
+  <button onclick="decryptMessage()">Decrypt</button>
+  <button onclick="goHome()">Back</button>
+  <div id="receiveOutput" class="output"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/crypto-js@4.1.1/crypto-js.min.js"></script>
+<script>
+  let users = {};
+  let currentUser = "";
+  let latestMessage = "";  // In real app, this would come from a database
+
+  function show(id) {
+    document.querySelectorAll(".screen").forEach(el => el.classList.add("hidden"));
+    document.getElementById(id).classList.remove("hidden");
+  }
+
+  function isInKenya() {
+    return fetch('https://ipapi.co/json/').then(res => res.json()).then(data => data.country_name === "Kenya").catch(() => false);
+  }
+
+  function validateKey(key, username, password) {
+    if (key.includes(username) || key.includes(password)) return false;
+    if (/(\d)\1/.test(key)) return false; // double digits
+    if (/^\d+$/.test(key) || /^[a-zA-Z]+$/.test(key)) return false;
+    if (/\d{4}/.test(key)) return false; // likely a year or date
+    return true;
+  }
+
+  function validatePassword(username, password) {
+    return !password.toLowerCase().includes(username.toLowerCase());
+  }
+
+  function signUp() {
+    const user = document.getElementById("username").value;
+    const pass = document.getElementById("password").value;
+    if (!user || !pass || !validatePassword(user, pass)) {
+      document.getElementById("authError").innerText = "Invalid password. Should not contain username.";
+      return;
+    }
+    if (users[user]) {
+      document.getElementById("authError").innerText = "User already exists.";
+      return;
+    }
+    users[user] = pass;
+    document.getElementById("authError").innerText = "Sign up successful. You can now sign in.";
+  }
+
+  function signIn() {
+    const user = document.getElementById("username").value;
+    const pass = document.getElementById("password").value;
+    if (users[user] !== pass) {
+      document.getElementById("authError").innerText = "Invalid credentials.";
+      return;
+    }
+    currentUser = user;
+    document.getElementById("currentUser").innerText = currentUser;
+    show("homeScreen");
+  }
+
+  function selectMode(mode) {
+    show(mode === "send" ? "sendScreen" : "receiveScreen");
+  }
+
+  function goHome() {
+    show("homeScreen");
+  }
+
+  async function sendMessage() {
+    if (!await isInKenya()) {
+      document.getElementById('sendOutput').innerText = 'Error: Sender must be in Kenya.';
+      return;
+    }
+    const msg = document.getElementById("sendMessage").value;
+    const key = document.getElementById("sendKey").value;
+    if (!validateKey(key, currentUser, users[currentUser])) {
+      document.getElementById("sendOutput").innerText = "Invalid encryption key.";
+      return;
+    }
+    const encrypted = CryptoJS.AES.encrypt(msg, key).toString();
+    latestMessage = encrypted;
+    document.getElementById("sendOutput").innerText = `Message sent.\nEncrypted: ${encrypted}`;
+  }
+
+  async function decryptMessage() {
+    if (!await isInKenya()) {
+      document.getElementById('receiveOutput').innerText = 'Error: Receiver must be in Kenya.';
+      return;
+    }
+    const key = document.getElementById("receiveKey").value;
+    try {
+      const bytes = CryptoJS.AES.decrypt(latestMessage, key);
+      const plain = bytes.toString(CryptoJS.enc.Utf8);
+      if (!plain) throw new Error();
+      document.getElementById("receiveOutput").innerText = `Message: ${plain}`;
+    } catch {
+      document.getElementById("receiveOutput").innerText = "Invalid key or message.";
+    }
+  }
+</script>
+</body>
+</html>
